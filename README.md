@@ -1,222 +1,172 @@
-# EcoCycle Machine Operation Guide
+# EcoCycle Firebase Data Contract
 
-This project controls a composting / soil mixing machine with LCD display output, sensor monitoring, and Firebase status reporting. The machine follows a defined sequence of operations and updates both the local display and the mobile app status.
+This project writes machine activity and batch records to Firebase Realtime Database using fixed paths. The mobile app and dashboard should read from these exact values instead of using random push IDs.
 
-## 1. User Interaction / Hopper Conditions
+## 1. Activity state map
 
-### Loam Soil Hopper
+The machine activity value is stored in `/activity` as a numeric integer.
 
-- If loam soil level is OK:
-  - LCD: `LOAM SOIL: OK`
-  - App status: `LOAM SOIL: OK`
-- If loam soil level is below the acceptable limit:
-  - LCD: `WARNING: ADD LOAM SOIL`
-  - App status: `WARNING: ADD LOAM SOIL`
+| Value | Meaning |
+| --- | --- |
+| 0 | Idle |
+| 1 | Grinding |
+| 2 | Adding Soil |
+| 3 | Mixing |
+| 4 | Getting Sensor Data |
+| 5 | Dispensing |
+| 6 | Waiting to Remove Container |
 
-### Food Waste Hopper
+This is the value map the app should read and interpret.
 
-- If food waste level is empty:
-  - LCD: `WAITING`
-  - App status: `WAITING`
-- If food waste level is OK:
-  - LCD: `FOOD WASTE: OK`
-  - App status: `FOOD WASTE: OK`
+Example:
 
-## 2. Soil Addition
+```cpp
+Database.get<int>(aClient, "/activity");
+```
 
-When the machine is adding soil to the mixing chamber:
+Flutter example:
 
-- LCD: `ADDING SOIL: CURRENT WEIGHT / TARGET WEIGHT`
-- Example: `90 / 950 GRAMS`
-- App status: `ADDING SOIL`
+```dart
+final activity = snapshot.child('/activity').value as int? ?? 0;
 
-This is used to add a target amount of soil into the chamber:
+final labels = {
+  0: 'Idle',
+  1: 'Grinding',
+  2: 'Adding Soil',
+  3: 'Mixing',
+  4: 'Getting Sensor Data',
+  5: 'Dispensing',
+  6: 'Waiting to Remove Container',
+};
 
-- `TARGET_SOIL_GRAMS = 950`
-- The system continues until the current weight reaches the target weight.
+final label = labels[activity] ?? 'Unknown';
+```
 
-## 3. Food Waste Processing Sequence
+---
 
-When the food waste level reaches a defined threshold:
+## 2. Recommended Firebase paths
 
-1. The machine waits for the drainage time before grinding.
-2. During waiting, the LCD displays:
-   - `DRAINING. TIME REMAINING: (XXXs)`
-3. Before starting the grinder:
-   - `TURNING ON GRINDER`
-4. During grinding:
-   - `GRINDING: FOOD WASTE CURRENT WT / TARGET WT`
-   - Example: `GRINDING: 230 / 500 GRAMS`
-5. After grinding:
-   - `TURNING OFF GRINDER`
+```cpp
+const String kActivityPath = "/activity";
+const String kRecordsPath = "/records";
+```
 
-Then the machine starts the mixing cycle for the configured mixing time.
+The app can also read the human-readable status in the same pattern if needed:
 
-## 4. Mixing Cycle
+```cpp
+const String kMachineStatePath = "/machine/state";
+const String kAppStatusPath = "/machine/app_status";
+```
 
-### Before mixing
+---
 
-- LCD: `TURNING ON MIXER`
-- App status: `MIXING`
+## 3. Batch record data format
 
-### During mixing
+Each batch is stored under `/records/EC-XXX` as a CSV string.
 
-- LCD: `MIXING: TIME REMAINING: (XXX)s`
-- App status: `MIXING`
-
-### After mixing
-
-- LCD: `TURNING OFF MIXER`
-
-## 5. Blade Positioning and Sensor Probe Operation
-
-The machine positions the mixing blades to accommodate the sensor probes using a Hall effect sensor.
-
-- LCD: `POSITIONING MIXING BLADES`
-- App status: `POSITIONING BLADES`
-
-Then the machine lowers the sensor probe:
-
-- LCD: `LOWERING SENSOR PROBE`
-- App status: `LOWERING PROBE`
-
-## 6. Sensor Reading Sequence
-
-The sensor probe gets the temperature and moisture of the mixture.
-
-### Temperature
-
-- LCD: `GETTING TEMPERATURE`
-- App status: `READING TEMPERATURE`
-- Final print: `TEMPERATURE: XX.X C`
-
-### Moisture
-
-- LCD: `GETTING MOISTURE`
-- App status: `READING MOISTURE`
-- Final print: `MOISTURE: XX %`
-
-## 7. Batch Record Creation
-
-After sensor values are captured, the machine assigns a batch number and saves the record.
-
-Example output:
+CSV format:
 
 ```text
-BATCH #: 104
-DATE: 2026-10-02
-TIME: 14:35:21
-TEMPERATURE: 29.4 C
-MOISTURE: 58 %
+batch number,timestamp,temperature,humidity
 ```
 
-Then the machine opens the mixer outlet / discharge opening.
+Example:
 
-- LCD: `OPENING MIXER`
-- App status: `OPENING MIXER`
-
-## 8. Dispensing / Output Cycle
-
-Before dispensing:
-
-- LCD: `TURNING ON MIXER`
-- App status: `DISPENSING`
-
-During dispensing:
-
-- LCD: `MIXING: TIME REMAINING: (XXX)s`
-- App status: `DISPENSING`
-
-After dispensing:
-
-- LCD: `TURNING OFF MIXER`
-
-Finally, the machine waits for the user to remove the container.
-
-- LCD: `WAITING FOR CONTAINER REMOVAL`
-- App status: `WAITING TO REMOVE CONTAINER`
-
----
-
-# Machine State Table
-
-| Machine State | LCD PRINT | MOBILE APP STATUS PRINT |
-| --- | --- | --- |
-| 0 = Idle | `IDLE` | `IDLE` |
-| 1 = Grinding | `TURNING ON GRINDER` / `GRINDING: FOOD WASTE CURRENT WT / TARGET WT` / `TURNING OFF GRINDER` | `GRINDING` |
-| 2 = Adding Soil | `ADDING SOIL: CURRENT WEIGHT / TARGET WEIGHT` | `ADDING SOIL` |
-| 3 = Mixing | `TURNING ON MIXER` / `MIXING: TIME REMAINING: (XXX)s` / `TURNING OFF MIXER` | `MIXING` |
-| 4 = Getting Sensor Data | `GETTING TEMPERATURE` / `GETTING MOISTURE` / `TEMPERATURE: XX.X C` / `MOISTURE: XX %` | `READING SENSORS` |
-| 5 = Dispensing | `OPENING MIXER` / `TURNING ON MIXER` / `MIXING: TIME REMAINING: (XXX)s` / `TURNING OFF MIXER` | `DISPENSING` |
-| 6 = Waiting to Remove Container | `WAITING FOR CONTAINER REMOVAL` | `WAITING TO REMOVE CONTAINER` |
-
----
-
-# Firebase Status Writing
-
-These states are intended to be written to Firebase for the mobile app and dashboard.
-
-## Recommended Firebase paths
-
-```cpp
-const String kMachineStatePath   = "/machine/state";
-const String kLcdPrintPath       = "/machine/lcd_print";
-const String kAppStatusPath      = "/machine/app_status";
-const String kBatchPath          = "/machine/batch";
-const String kTemperaturePath    = "/machine/temperature";
-const String kMoisturePath       = "/machine/moisture";
-const String kLastUpdatedPath    = "/machine/last_updated";
+```text
+EC-004,1790904651,29.4,58.0
 ```
 
-## Example Firebase write code
+This means:
 
-```cpp
-void updateFirebaseStatus(int state, const String &lcdText, const String &appText,
-                          float temperature, float moisture, int batchNumber)
-{
-  FirebaseWriter firebase(
-      FIREBASE_WEB_API_KEY,
-      FIREBASE_DATABASE_URL,
-      FIREBASE_USER_EMAIL,
-      FIREBASE_USER_PASSWORD,
-      3);
+- `EC-004` = batch number
+- `1790904651` = Unix timestamp in seconds
+- `29.4` = temperature in °C
+- `58.0` = moisture in %
 
-  firebase.begin();
+The app should read the value as a string and then split by comma.
 
-  firebase.writeInt("/machine/state", state);
-  firebase.writeString("/machine/lcd_print", lcdText);
-  firebase.writeString("/machine/app_status", appText);
-  firebase.writeFloat("/machine/temperature", temperature);
-  firebase.writeFloat("/machine/moisture", moisture);
-  firebase.writeInt("/machine/batch", batchNumber);
+Flutter example:
+
+```dart
+final recordValue = snapshot.child('EC-004').value as String? ?? '';
+final parts = recordValue.split(',');
+
+if (parts.length >= 4) {
+  final batchNumber = parts[0];
+  final timestamp = int.tryParse(parts[1]) ?? 0;
+  final temperature = double.tryParse(parts[2]) ?? 0.0;
+  final humidity = double.tryParse(parts[3]) ?? 0.0;
 }
 ```
 
-If the project uses the FirebaseClient API directly, the equivalent pattern is:
+---
 
-```cpp
-Database.set<int>(aClient, "/machine/state", state);
-Database.set<String>(aClient, "/machine/lcd_print", lcdText);
-Database.set<String>(aClient, "/machine/app_status", appText);
-Database.set<float>(aClient, "/machine/temperature", temperature);
-Database.set<float>(aClient, "/machine/moisture", moisture);
-Database.set<int>(aClient, "/machine/batch", batchNumber);
+## 4. Fetching records from Flutter
+
+### Read the activity value
+
+```dart
+final activitySnap = await FirebaseDatabase.instance.ref('/activity').get();
+final activityValue = activitySnap.value as int? ?? 0;
 ```
 
-> Use exact fixed-path writes for app status, not random push IDs. This keeps the app status synchronized and easy to read on the dashboard.
+### Read all records
+
+```dart
+final recordsSnap = await FirebaseDatabase.instance.ref('/records').get();
+final recordsMap = recordsSnap.value as Map<dynamic, dynamic>? ?? {};
+
+recordsMap.forEach((key, value) {
+  final csv = value.toString();
+  final parts = csv.split(',');
+
+  if (parts.length >= 4) {
+    final batch = parts[0];
+    final timestamp = int.tryParse(parts[1]) ?? 0;
+    final temp = double.tryParse(parts[2]) ?? 0.0;
+    final humidity = double.tryParse(parts[3]) ?? 0.0;
+
+    print('batch=$batch timestamp=$timestamp temp=$temp humidity=$humidity');
+  }
+});
+```
+
+### Read a single batch record
+
+```dart
+final recordSnap = await FirebaseDatabase.instance.ref('/records/EC-004').get();
+final csv = recordSnap.value?.toString() ?? '';
+print(csv);
+```
 
 ---
 
-# Example Flow
+## 5. Activity and batch usage in the app
 
-```text
-0 -> IDLE
-1 -> GRINDING
-2 -> ADDING SOIL
-3 -> MIXING
-4 -> GETTING SENSOR DATA
-5 -> DISPENSING
-6 -> WAITING TO REMOVE CONTAINER
+Use the activity value to show current machine state in the UI, and use `/records/EC-XXX` to show historical batch data.
+
+Example:
+
+```dart
+final activity = snapshot.child('/activity').value as int? ?? 0;
+final description = {
+  0: 'Idle',
+  1: 'Grinding',
+  2: 'Adding Soil',
+  3: 'Mixing',
+  4: 'Getting Sensor Data',
+  5: 'Dispensing',
+  6: 'Waiting to Remove Container',
+}[activity] ?? 'Unknown';
 ```
 
-The machine should keep updating the app with the latest status message and the corresponding machine state value so the mobile app reflects the current process in real time.
+For records, parse the CSV string and display the values in a list or detail screen.
+
+---
+
+## 6. Notes
+
+- Use fixed Firebase paths, not random push IDs.
+- Store numeric activity as an integer.
+- Store each batch as a single CSV string under `/records/EC-XXX`.
+- Keep the batch number padded to three digits, for example `EC-001`, `EC-010`, `EC-020`.
