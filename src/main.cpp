@@ -16,6 +16,7 @@
 #define ENABLE_DATABASE
 #include <FirebaseClient.h>
 #include "ExampleFunctions.h"
+#include "Adafruit_MAX31865.h"
 
 #include "BuzzerHelper.h"
 #include "Config.h"
@@ -23,6 +24,7 @@
 #include "Constants.h"
 
 BuzzerHelper buzzer(BUZZER_PIN);
+Adafruit_MAX31865 temperatureSensor(MAX31865_CS_PIN);
 
 SSL_CLIENT ssl_client;
 using AsyncClient = AsyncClientClass;
@@ -435,10 +437,67 @@ void setup()
   Serial.println("------------------------------");
   Serial.println("Firebase write test");
   Serial.println("------------------------------");
+
+  temperatureSensor.begin(MAX31865_3WIRE);
+  pinMode(MOISTURE_SENSOR_ANALOG_PIN, INPUT);
 }
 
 void loop()
 {
+  Serial.printf("mOISTURE: %d\n", map(analogRead(MOISTURE_SENSOR_ANALOG_PIN), 0, 4095, 0, 100));
+  delay(1000); // Delay to avoid flooding the serial output
+  return;
+  uint16_t rtd = temperatureSensor.readRTD();
+
+  Serial.print("RTD value: ");
+  Serial.println(rtd);
+  float ratio = rtd;
+  ratio /= 32768;
+  Serial.print("Ratio = ");
+  Serial.println(ratio, 8);
+  Serial.print("Resistance = ");
+  Serial.println(RREF * ratio, 8);
+  Serial.print("Temperature = ");
+  Serial.println(temperatureSensor.temperature(RNOMINAL, RREF));
+
+  // Check and print any faults
+  uint8_t fault = temperatureSensor.readFault();
+  if (fault)
+  {
+    Serial.print("Fault 0x");
+    Serial.println(fault, HEX);
+    if (fault & MAX31865_FAULT_HIGHTHRESH)
+    {
+      Serial.println("RTD High Threshold");
+    }
+    if (fault & MAX31865_FAULT_LOWTHRESH)
+    {
+      Serial.println("RTD Low Threshold");
+    }
+    if (fault & MAX31865_FAULT_REFINLOW)
+    {
+      Serial.println("REFIN- > 0.85 x Bias");
+    }
+    if (fault & MAX31865_FAULT_REFINHIGH)
+    {
+      Serial.println("REFIN- < 0.85 x Bias - FORCE- open");
+    }
+    if (fault & MAX31865_FAULT_RTDINLOW)
+    {
+      Serial.println("RTDIN- < 0.85 x Bias - FORCE- open");
+    }
+    if (fault & MAX31865_FAULT_OVUV)
+    {
+      Serial.println("Under/Over voltage");
+    }
+    temperatureSensor.clearFault();
+  }
+  Serial.println();
+
+  delay(1000);
+
+  return;
+
   buzzer.update();
   firebaseWriter.loop();
 

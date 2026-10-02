@@ -17,4 +17,7 @@
 
 #define FIREBASE_ACTIVITY_PATH "/activity"
 
+#define RREF 430.0     // Reference resistor value in ohms
+#define RNOMINAL 100.0 // Nominal resistance of PT100 at 0°C in ohms
+
 #endif // CONSTANTS_H
