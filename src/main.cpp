@@ -11,20 +11,75 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <time.h>
+#include <Wire.h>
+#include <MCP23017.h>
 
 #define ENABLE_USER_AUTH
 #define ENABLE_DATABASE
 #include <FirebaseClient.h>
 #include "ExampleFunctions.h"
 #include "Adafruit_MAX31865.h"
+#include "Adafruit_VL53L0X.h"
 
 #include "BuzzerHelper.h"
 #include "Config.h"
 #include "Defines.h"
 #include "Constants.h"
+#include "SoilMoistureSensor.h"
 
 BuzzerHelper buzzer(BUZZER_PIN);
 Adafruit_MAX31865 temperatureSensor(MAX31865_CS_PIN);
+Adafruit_VL53L0X tofSensor = Adafruit_VL53L0X();
+SoilMoistureSensor soilMoisture(MOISTURE_SENSOR_ANALOG_PIN, 800, 300);
+MCP23017 mcpInputs(MCP_INPUTS_ADDRESS);
+MCP23017 mcpOutputs(MCP_OUTPUTS_ADDRESS);
+
+bool initializeMcp23017()
+{
+  Wire.begin();
+
+  if (!mcpInputs.begin(false))
+  {
+    Serial.println("Failed to initialize MCP23017 inputs");
+    return false;
+  }
+  else
+  {
+    Serial.println("MCP23017 for inputs initialized");
+  }
+
+  // if (!mcpOutputs.begin(false))
+  // {
+  //   Serial.println("Failed to initialize MCP23017 outputs");
+  //   return false;
+  // }
+
+  for (uint8_t pin = 0; pin < 16; ++pin)
+  {
+    mcpInputs.pinMode1(pin, INPUT);
+    mcpOutputs.pinMode1(pin, OUTPUT);
+    mcpOutputs.write1(pin, LOW);
+  }
+
+  Serial.println("MCP23017 initialized");
+  return true;
+}
+
+void setMcpOutput(uint8_t expanderPin, bool high)
+{
+  if (expanderPin >= 16)
+    return;
+
+  mcpOutputs.write1(expanderPin, high ? HIGH : LOW);
+}
+
+bool readMcpInput(uint8_t expanderPin)
+{
+  if (expanderPin >= 16)
+    return false;
+
+  return mcpInputs.read1(expanderPin) == HIGH;
+}
 
 SSL_CLIENT ssl_client;
 using AsyncClient = AsyncClientClass;
@@ -159,6 +214,32 @@ void onFailedWrite()
 
 FirebaseWriter firebaseWriter(3);
 bool firebaseWriteTriggered = false;
+
+float getTofDistanceCm()
+{
+  if (!tofSensor.isRangeComplete())
+  {
+    return -1.0f;
+  }
+
+  uint16_t distanceMm = tofSensor.readRange();
+  if (distanceMm == 0 || distanceMm == 65535)
+  {
+    return -1.0f;
+  }
+
+  return distanceMm / 10.0f;
+}
+
+int getMoisturePercent()
+{
+  return soilMoisture.readMoisture();
+}
+
+float getTemperatureCelsius()
+{
+  return temperatureSensor.temperature(RNOMINAL, RREF);
+}
 
 String makeBatchPath(const String &batchNumber)
 {
@@ -430,6 +511,8 @@ void setup()
   Serial.println(formatEpochTime((unsigned long)now));
 
   buzzer.begin();
+  initializeMcp23017();
+
   firebaseWriter.begin();
   firebaseWriter.setFailedAttemptCallback(onFailedAttempt);
   firebaseWriter.setFailedWriteCallback(onFailedWrite);
@@ -438,63 +521,24 @@ void setup()
   Serial.println("Firebase write test");
   Serial.println("------------------------------");
 
-  temperatureSensor.begin(MAX31865_3WIRE);
-  pinMode(MOISTURE_SENSOR_ANALOG_PIN, INPUT);
+  // temperatureSensor.begin(MAX31865_3WIRE);
+
+  // if (!tofSensor.begin())
+  // {
+  //   Serial.println(F("Failed to boot VL53L0X"));
+  // }
+  // else
+  // {
+  //   Serial.println(F("VL53L0X initialized"));
+  //   tofSensor.startRangeContinuous();
+  // }
+
+  // pinMode(MOISTURE_SENSOR_ANALOG_PIN, INPUT);
+  // Serial.println("Soil moisture sensor initialized");
 }
 
 void loop()
 {
-  Serial.printf("mOISTURE: %d\n", map(analogRead(MOISTURE_SENSOR_ANALOG_PIN), 0, 4095, 0, 100));
-  delay(1000); // Delay to avoid flooding the serial output
-  return;
-  uint16_t rtd = temperatureSensor.readRTD();
-
-  Serial.print("RTD value: ");
-  Serial.println(rtd);
-  float ratio = rtd;
-  ratio /= 32768;
-  Serial.print("Ratio = ");
-  Serial.println(ratio, 8);
-  Serial.print("Resistance = ");
-  Serial.println(RREF * ratio, 8);
-  Serial.print("Temperature = ");
-  Serial.println(temperatureSensor.temperature(RNOMINAL, RREF));
-
-  // Check and print any faults
-  uint8_t fault = temperatureSensor.readFault();
-  if (fault)
-  {
-    Serial.print("Fault 0x");
-    Serial.println(fault, HEX);
-    if (fault & MAX31865_FAULT_HIGHTHRESH)
-    {
-      Serial.println("RTD High Threshold");
-    }
-    if (fault & MAX31865_FAULT_LOWTHRESH)
-    {
-      Serial.println("RTD Low Threshold");
-    }
-    if (fault & MAX31865_FAULT_REFINLOW)
-    {
-      Serial.println("REFIN- > 0.85 x Bias");
-    }
-    if (fault & MAX31865_FAULT_REFINHIGH)
-    {
-      Serial.println("REFIN- < 0.85 x Bias - FORCE- open");
-    }
-    if (fault & MAX31865_FAULT_RTDINLOW)
-    {
-      Serial.println("RTDIN- < 0.85 x Bias - FORCE- open");
-    }
-    if (fault & MAX31865_FAULT_OVUV)
-    {
-      Serial.println("Under/Over voltage");
-    }
-    temperatureSensor.clearFault();
-  }
-  Serial.println();
-
-  delay(1000);
 
   return;
 
